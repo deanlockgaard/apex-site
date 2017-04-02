@@ -12,7 +12,7 @@ var fs = require('fs');
 var async = require('async');
 var _ = require('lodash');
 var exec = require('child_process').exec;
-var semver = require('semver'); 
+var semver = require('semver');
 var naturalSort = require('javascript-natural-sort');
 var dateFormat = require('dateformat');
 
@@ -72,7 +72,7 @@ gulp.task('html', ['md2html'], function() {
 
   // Render the files in pages
   gulp.src('./src/pages/*.html')
-    .pipe(handlebars({ 
+    .pipe(handlebars({
         nav: require('./navigation.json'),
         releases: require('./releases.json'),
         roadmap: require('./roadmap.json')
@@ -130,10 +130,10 @@ gulp.task('fetch-roadmap', function(taskCb) {
   var projects = [
     { key: 'core', name: 'APEXCORE', apiUrl: 'https://issues.apache.org/jira/rest/api/2/', url: 'https://issues.apache.org/jira/' },
     { key: 'malhar', name: 'APEXMALHAR', apiUrl: 'https://issues.apache.org/jira/rest/api/2/', url: 'https://issues.apache.org/jira/' }
-  ];  
+  ];
 
   // JQL terms are separated with AND/OR and parameters outside JQL are separated with &
-  // 
+  //
   // Query to look up all APEXCORE and APEXMALHAR issues with label of roadmap
   //    https://issues.apache.org/jira/rest/api/2/search?jql=project+in+(APEXCORE,APEXMALHAR)+AND+labels+in+(roadmap)+and+fixVersion+in+(EMPTY,unreleasedVersions())+ORDER+BY+key
   //
@@ -160,9 +160,9 @@ gulp.task('fetch-roadmap', function(taskCb) {
     request({
         url: requestUrl,
         json: true
-      }, 
+      },
       function(err, httpResponse, versions) {
-    
+
         // Abort on error
         if (err) {
           console.log('Error when trying to request URL: ', requestUrl);
@@ -186,9 +186,9 @@ gulp.task('fetch-roadmap', function(taskCb) {
         request.post({
           url: project.apiUrl + 'search',
           json: apiRequest
-        }, 
+        },
         function(err, httpResponse, jiras) {
-          
+
           // Abort on error
           if (err) {
             return cb(err);
@@ -204,11 +204,11 @@ gulp.task('fetch-roadmap', function(taskCb) {
 
             var apiRequests = [];
             for (var i = 1; i < pageCount; i++) {
-              apiRequests[i-1] = _.extend({}, 
-                apiRequest, 
-                { 
-                  startAt: i * pageSize, 
-                  maxResults: pageSize 
+              apiRequests[i-1] = _.extend({},
+                apiRequest,
+                {
+                  startAt: i * pageSize,
+                  maxResults: pageSize
                 }
               );
             }
@@ -219,9 +219,9 @@ gulp.task('fetch-roadmap', function(taskCb) {
               request.post({
                 url: project.apiUrl + 'search',
                 json: apiPageRequest
-              }, 
+              },
               function(err, httpResponse, pageJiras) {
-                
+
                 // Abort on error
                 if (err) {
                   return pageCb(err);
@@ -245,7 +245,7 @@ gulp.task('fetch-roadmap', function(taskCb) {
 
           } else {
             // Return with a new project object with jiras.  cb is from async.map call above
-            cb(null, _.extend({}, project, { 
+            cb(null, _.extend({}, project, {
               jiras: jiras.issues.sort(function(a,b) {return naturalSort(a.key, b.key); }),
               versions: unreleasedVersions
             }));
@@ -268,7 +268,7 @@ gulp.task('fetch-roadmap', function(taskCb) {
 
     // Use the project key and provide associated arrays of matching jiras and versions
     projectResults.forEach(function(project) {
-      _.set(fileContents, project.key, 
+      _.set(fileContents, project.key,
         {
           name: project.name,
           url: project.url,
@@ -286,11 +286,11 @@ gulp.task('fetch-roadmap', function(taskCb) {
 });
 
 // Creates releases.json file.
-// 
-// 1. Requests page that lists release versions (https://dist.apache.org/repos/dist/release/incubator/apex[/malhar])
+//
+// 1. Requests page that lists release versions (https://dist.apache.org/repos/dist/release/apex)
 // 2. Queries Github for release tags to find the date they were published to github
 // 3. Writes to releases.json with release information.
-// 
+//
 gulp.task('fetch-releases', function(taskCb) {
 
   // The base location for release listings
@@ -298,9 +298,8 @@ gulp.task('fetch-releases', function(taskCb) {
 
   // The release "targets", in this case meaning apex-core and apex-malhar
   var targets = [
-    // NOTE: Once apex leaves incubation, this object should be changed to exclude "incubator"
-    { key: 'core.src',   path: 'release/incubator/apex',        repo: 'apex-core' },
-    { key: 'malhar.src', path: 'release/incubator/apex/malhar', repo: 'apex-malhar' }
+    { key: 'core.src',   path: 'release/apex', repo: 'apex-core' },
+    { key: 'malhar.src', path: 'release/apex', repo: 'apex-malhar' }
   ];
 
   // For each target, get the releases
@@ -309,7 +308,7 @@ gulp.task('fetch-releases', function(taskCb) {
     // Request the page that lists the release versions,
     // e.g. https://dist.apache.org/repos/dist/release/incubator/apex
     request(distUrl + target.path, function(err, response) {
-    
+
       // Abort for error
       if (err) {
         return cb(err);
@@ -327,17 +326,18 @@ gulp.task('fetch-releases', function(taskCb) {
           // Convert this NodeList to an array
           releaseLinks = Array.prototype.slice.call(releaseLinks)
 
-          // Filter out non-version-looking links
+          // Filter out non-version-looking links,
+          // and keep only the links matching the target repo (either apex-core or apex-malhar)
           .filter(function(el) {
             var text = el.innerHTML.trim();
-            return ['..', 'KEYS', 'malhar', 'malhar/'].indexOf(text) === -1;
+            return (['..', 'KEYS', 'malhar', 'malhar/'].indexOf(text) === -1) && (text.indexOf(target.repo) !== -1);
           });
 
           // Create array of releases from this filtered NodeList
           var releases = releaseLinks.map(function(el) {
 
-            // Trim the href attribute of leading "v" and trailing slash
-            var releaseVersion = el.innerHTML.trim().replace(/^v/, '').replace(/\/$/, '');
+            // @@@@@@@@@ Trim the href attribute of leading "v" and trailing slash
+            var releaseVersion = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace('-incubating', '').replace(/\/$/, '');
             var docsVersion = semver.major(releaseVersion) + '.' + semver.minor(releaseVersion);
             return {
               version: releaseVersion,
@@ -387,6 +387,8 @@ gulp.task('fetch-releases', function(taskCb) {
                 headers: { 'User-Agent': 'apache' }
               }, function(err, response) {
 
+                console.log('response', response);
+
                 // Abort if the commit could not be found
                 if (err) {
                   return eachCb(err);
@@ -399,7 +401,7 @@ gulp.task('fetch-releases', function(taskCb) {
                 eachCb();
 
               });
-              
+
             });
 
           }, function(err) { // callback for async.each(releases, ...)
@@ -428,11 +430,32 @@ gulp.task('fetch-releases', function(taskCb) {
 
   }, function(err, targetsWithVersions) { // this is the async.map(targets) callback
 
+    console.log('targetsWithVersions', targetsWithVersions);
+
     // This will be written to releases.json
     var fileContents = {};
 
+
     // Use the "key" to set core.src and malhar.src, etc.
     targetsWithVersions.forEach(function(trg) {
+      if (!trg || !trg.key) {
+        trg = {};
+        trg.key = 'something.way';
+        trg.releases = [
+          {
+            "version": "3.7.0",
+            "docs": "3.7",
+            "repo": "apex-malhar",
+            "date": 1491025960000
+          },
+          {
+            "version": "3.6.0",
+            "docs": "3.6",
+            "repo": "apex-malhar",
+            "date": 1480203354000
+          }
+        ];
+      }
       _.set(fileContents, trg.key, trg.releases);
     });
 
