@@ -15,6 +15,7 @@ var exec = require('child_process').exec;
 var semver = require('semver');
 var naturalSort = require('javascript-natural-sort');
 var dateFormat = require('dateformat');
+var Q = require('q');
 
 // Constants
 var TEMP_PARTIAL_LOCATION = './.tmp/partials/';
@@ -294,31 +295,114 @@ gulp.task('fetch-roadmap', function(taskCb) {
 gulp.task('fetch-releases', function(taskCb) {
 
   // The base location for release listings
-  var distUrl = 'https://dist.apache.org/repos/dist/';
+  var distUrl = 'https://dist.apache.org/repos/dist/release/apex/';
 
   // The release "targets", in this case meaning apex-core and apex-malhar
   var targets = [
-    { key: 'core.src',   path: 'release/apex', repo: 'apex-core' },
-    { key: 'malhar.src', path: 'release/apex', repo: 'apex-malhar' }
+    { key: 'core.src', repo: 'apex-core' },
+    { key: 'malhar.src', repo: 'apex-malhar' }
   ];
 
-  // For each target, get the releases
-  async.map(targets, function(target, cb) {
+  // Request the page that lists the release versions
+  // and process the release info into consumable data
+  function getReleasePageLinks() {
 
-    // Request the page that lists the release versions,
-    // e.g. https://dist.apache.org/repos/dist/release/incubator/apex
-    request(distUrl + target.path, function(err, response) {
+    var dfd = Q.defer();
 
-      // Abort for error
+    request(distUrl, function(err, response) {
+
+      // Abort if tags not found or something bad happened with the git ls-remote command
       if (err) {
-        return cb(err);
+        dfd.reject(err);
       }
 
-      // Parse out the link names which are the
-      // available versions
+      dfd.resolve(response.body);
+    });
+    return dfd.promise;
+  }
+
+
+  // Get tags and hashes for a repo's releases
+  function getRepoTags(repoName) {
+
+    var dfd = Q.defer();
+
+    // Get the tags for the repo
+    var gitCommand = 'git ls-remote --tags "git://git.apache.org/' + repoName + '.git"';
+
+    exec(gitCommand, function(err, stdout, stderr) {
+
+      // Abort if tags not found or something bad happened with the git ls-remote command
+      if (err || stderr) {
+        def.reject(err || stderr);
+      }
+
+      // Lines from ls-remote command look like [COMMIT_HASH]\trefs/tags/[TAG_NAME]
+      var lines = stdout.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        if (lines[i] && lines[i].trim().length > 0) {
+          // console.log("Processing line[", i, "] : ", lines[i]);
+          lines[i] = lines[i].split('\t');
+          if (lines[i][1]) {
+            lines[i][1] = lines[i][1].replace('refs/tags/v', '');
+          }
+        }
+      }
+      dfd.resolve(lines);
+    });
+
+    return dfd.promise;
+  }
+
+
+  // Get tags and hashes for all repos (apex-core and apex-malhar)
+  function getAllTargetReposTagsHashes() {
+
+    return Q.all(targets.map(function(target) {
+      var dfd = Q.defer();
+      getRepoTags(target.repo).then(
+        function(response) {
+          target.releases = response;
+          dfd.resolve();
+        }
+      );
+      return dfd.promise;
+    }));
+  }
+
+
+  // Get data for a single tag
+  function getTagDate(repoName, tagHash) {
+
+    var dfd = Q.defer();
+
+    // Get info about the tag via its hash (found with the ls-remote command)
+    request({
+        url: 'https://api.github.com/repos/apache/' + repoName + '/git/tags/' + tagHash, // Github API address
+        json: true,
+        headers: { 'User-Agent': 'apache' }
+      }, 
+
+      function(err, response) {
+        // Abort if the commit could not be found
+        if (err) {
+          dfd.reject(err);
+        }
+        // Set the date from this information and resolve
+        dfd.resolve(Date.parse(response.body.tagger.date));
+      }
+    );
+    return dfd.promise;
+  }
+
+
+  // Start by getting links from the releases page
+  getReleasePageLinks().then(
+    function(response, err) {
+
       jsdom.env(
-        response.body,
-        function (err, window) {
+        response,
+        function(err, window) {
 
           // Query the DOM for all links in the list
           var releaseLinks = window.document.querySelectorAll('ul li a');
@@ -326,144 +410,83 @@ gulp.task('fetch-releases', function(taskCb) {
           // Convert this NodeList to an array
           releaseLinks = Array.prototype.slice.call(releaseLinks)
 
-          // Filter out non-version-looking links,
-          // and keep only the links matching the target repo (either apex-core or apex-malhar)
+          // Filter out non-version-looking links
           .filter(function(el) {
             var text = el.innerHTML.trim();
-            return (['..', 'KEYS', 'malhar', 'malhar/'].indexOf(text) === -1) && (text.indexOf(target.repo) !== -1);
+            return (['..', 'KEYS', 'malhar', 'malhar/'].indexOf(text) === -1);
           });
 
           // Create array of releases from this filtered NodeList
           var releases = releaseLinks.map(function(el) {
 
-            // @@@@@@@@@ Trim the href attribute of leading "v" and trailing slash
-            var releaseVersion = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace('-incubating', '').replace(/\/$/, '');
-            var docsVersion = semver.major(releaseVersion) + '.' + semver.minor(releaseVersion);
+            var releaseStr = el.innerHTML.trim();
+            var repoName;
+
+            if (releaseStr.indexOf('apache-apex-malhar') !== -1) {
+              repoName = 'apex-malhar';
+            }
+
+            if (releaseStr.indexOf('apache-apex-core') !== -1) {
+              repoName = 'apex-core';
+            }
+
+            // Extract release version and docs version
+            var releaseVersion = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace(/\/$/, '');
+            var releaseSemVer = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace('-incubating', '').replace(/\/$/, '');
+            var docsVersion = semver.major(releaseSemVer) + '.' + semver.minor(releaseSemVer);
+
             return {
               version: releaseVersion,
               docs: docsVersion,
               // Add repo for use in async.each call below
-              repo: target.repo
+              repo: repoName
             };
           });
 
-          // Get the date for each release via the github API
-          async.each(releases, function(release, eachCb) {
 
-            // Get the tags for the repo
-            var gitCommand = 'git ls-remote --tags "git://git.apache.org/' + release.repo + '.git"';
-            exec(gitCommand, function(err, stdout, stderr) {
+          // Get tags and hashes for all target repos
+          getAllTargetReposTagsHashes().then(function(resp, err) {
 
-              // Abort if tags not found or something bad happened with the git ls-remote command
-              if (err || stderr) {
-                return eachCb(err || stderr);
-              }
-
-              // Lines from ls-remote command look like [COMMIT_HASH]\trefs/tags/[TAG_NAME]
-              var lines = stdout.split('\n');
-              var tagHash;
-
-              // Find hash for this release's tag
-              for (var i = 0; i < lines.length; i++) {
-                if (lines[i] && lines[i].trim().length > 0) {
-                  // console.log("Processing line[", i, "] : ", lines[i]);
-                  var parts = lines[i].split('\t');
-                  if (parts[1] && parts[1].replace(/^refs\/tags\/v?/, '') === release.version) {
-                    tagHash = parts[0];
-                    break;
-                  }
-                }
-              }
-
-              // Ensure we found one
-              if (!tagHash) {
-                return eachCb('Could not find tag from ls-remote command');
-              }
-
-              // Get info about the tag via its hash (found with the ls-remote command)
-              request({
-                url: 'https://api.github.com/repos/apache/' + release.repo + '/git/tags/' + tagHash, // Github API address
-                json: true,
-                headers: { 'User-Agent': 'apache' }
-              }, function(err, response) {
-
-                console.log('response', response);
-
-                // Abort if the commit could not be found
-                if (err) {
-                  return eachCb(err);
-                }
-
-                // Set the date from the this information
-                release.date = Date.parse(response.body.tagger.date);
-
-                // We're all done
-                eachCb();
-
-              });
-
-            });
-
-          }, function(err) { // callback for async.each(releases, ...)
-
-            // Abort if error occurred somewhere
             if (err) {
-              return cb(err);
+              console.log('ERROR', err);
             }
 
-            // Sort the releases by the date
-            releases.sort(function(a, b) {
-              return b.date - a.date;
+            // Go through all releases
+            Q.all(releases.map(function(release) {
+
+              var def = Q.defer();
+
+              // go through target releases
+              // first, find the correct target
+              for (var i=0; i<targets.length; i++) {
+                if(targets[i].repo === release.repo) {
+                  for(var j=0; j<targets[i].releases.length; j++) {
+                    // if target version matches release
+                    if (targets[i].releases[j][1] === release.version) {
+                      // arguments: repo, hash
+                      getTagDate(release.repo, targets[i].releases[j][0]).then(function(response) {
+                        release.date=response;
+                        def.resolve();
+                      });
+                      break;
+                    }
+                  }
+                  break;
+                }
+              }
+
+              return def.promise;
+            }))
+
+            .then(function() {
+              console.log(releases);
             });
 
-            // Return with a new target object with releases.
-            // Note that this is the cb from the async.map call above
-            cb(null, _.extend({}, target, { releases: releases }) );
-
           });
-
-        } // end jsdom.env callback
-      ); // end jsdom.env
-
-    }); // end request to the listing of this target
-
-
-  }, function(err, targetsWithVersions) { // this is the async.map(targets) callback
-
-    console.log('targetsWithVersions', targetsWithVersions);
-
-    // This will be written to releases.json
-    var fileContents = {};
-
-
-    // Use the "key" to set core.src and malhar.src, etc.
-    targetsWithVersions.forEach(function(trg) {
-      if (!trg || !trg.key) {
-        trg = {};
-        trg.key = 'something.way';
-        trg.releases = [
-          {
-            "version": "3.7.0",
-            "docs": "3.7",
-            "repo": "apex-malhar",
-            "date": 1491025960000
-          },
-          {
-            "version": "3.6.0",
-            "docs": "3.6",
-            "repo": "apex-malhar",
-            "date": 1480203354000
-          }
-        ];
-      }
-      _.set(fileContents, trg.key, trg.releases);
-    });
-
-    // Write the file to releases.json
-    fs.writeFile('./releases.json', JSON.stringify(fileContents, 0, 2), taskCb);
-
-  });
-
+        }
+      );
+    }
+  );
 });
 
 // Watch for changes
