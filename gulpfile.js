@@ -432,13 +432,12 @@ gulp.task('fetch-releases', function(taskCb) {
 
             // Extract release version and docs version
             var releaseVersion = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace(/\/$/, '');
-            var releaseSemVer = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace('-incubating', '').replace(/\/$/, '');
+            var releaseSemVer = releaseVersion.replace('-incubating', '');
             var docsVersion = semver.major(releaseSemVer) + '.' + semver.minor(releaseSemVer);
 
             return {
               version: releaseVersion,
               docs: docsVersion,
-              // Add repo for use in async.each call below
               repo: repoName
             };
           });
@@ -463,7 +462,7 @@ gulp.task('fetch-releases', function(taskCb) {
                   for(var j=0; j<targets[i].releases.length; j++) {
                     // if target version matches release
                     if (targets[i].releases[j][1] === release.version) {
-                      // arguments: repo, hash
+                      // arguments: repoName, tagHash
                       getTagDate(release.repo, targets[i].releases[j][0]).then(function(response) {
                         release.date=response;
                         def.resolve();
@@ -478,8 +477,27 @@ gulp.task('fetch-releases', function(taskCb) {
               return def.promise;
             }))
 
+            // After all tag dates are loaded
             .then(function() {
-              console.log(releases);
+
+              // sort releases by date
+              releases.sort(function(a, b) {
+                return b.date - a.date;
+              });
+
+              var fileContents = {};
+
+              // Use the "key" to set core.src and malhar.src, etc.
+              targets.forEach(function(trg) {
+                // filter releases by repo
+                _.set(fileContents, trg.key, releases.filter(function(el) {
+                  return el.repo === trg.repo;
+                }));
+              });
+
+              // Write the file to releases.json
+              fs.writeFile('./releases.json', JSON.stringify(fileContents, 0, 2));
+
             });
 
           });
