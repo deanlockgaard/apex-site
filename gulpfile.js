@@ -294,49 +294,39 @@ gulp.task('fetch-roadmap', function(taskCb) {
 //
 gulp.task('fetch-releases', function(taskCb) {
 
-  // The base location for release listings
-  var distUrl = 'https://dist.apache.org/repos/dist/release/apex/';
-
   // The release "targets", in this case meaning apex-core and apex-malhar
   var targets = [
     { key: 'core.src', repo: 'apex-core' },
     { key: 'malhar.src', repo: 'apex-malhar' }
   ];
 
-  // Request the page that lists the release versions
-  // and process the release info into consumable data
+  // Get contents for the page that lists the release versions
   function getReleasePageLinks() {
-
     var dfd = Q.defer();
 
-    request(distUrl, function(err, response) {
+    // The base location for release listings
+    var distUrl = 'https://dist.apache.org/repos/dist/release/apex/';
 
+    request(distUrl, function(err, response) {
       // Abort if tags not found or something bad happened with the git ls-remote command
       if (err) {
         dfd.reject(err);
       }
-
       dfd.resolve(response.body);
     });
     return dfd.promise;
   }
 
-
   // Get tags and hashes for a repo's releases
   function getRepoTags(repoName) {
-
     var dfd = Q.defer();
-
     // Get the tags for the repo
     var gitCommand = 'git ls-remote --tags "git://git.apache.org/' + repoName + '.git"';
-
     exec(gitCommand, function(err, stdout, stderr) {
-
       // Abort if tags not found or something bad happened with the git ls-remote command
       if (err || stderr) {
         def.reject(err || stderr);
       }
-
       // Lines from ls-remote command look like [COMMIT_HASH]\trefs/tags/[TAG_NAME]
       var lines = stdout.split('\n');
       for (var i = 0; i < lines.length; i++) {
@@ -350,7 +340,6 @@ gulp.task('fetch-releases', function(taskCb) {
       }
       dfd.resolve(lines);
     });
-
     return dfd.promise;
   }
 
@@ -373,16 +362,13 @@ gulp.task('fetch-releases', function(taskCb) {
 
   // Get data for a single tag
   function getTagDate(repoName, tagHash) {
-
     var dfd = Q.defer();
-
     // Get info about the tag via its hash (found with the ls-remote command)
     request({
         url: 'https://api.github.com/repos/apache/' + repoName + '/git/tags/' + tagHash, // Github API address
         json: true,
         headers: { 'User-Agent': 'apache' }
-      }, 
-
+      },
       function(err, response) {
         // Abort if the commit could not be found
         if (err) {
@@ -399,7 +385,6 @@ gulp.task('fetch-releases', function(taskCb) {
   // Start by getting links from the releases page
   getReleasePageLinks().then(
     function(response, err) {
-
       jsdom.env(
         response,
         function(err, window) {
@@ -413,26 +398,33 @@ gulp.task('fetch-releases', function(taskCb) {
           // Filter out non-version-looking links
           .filter(function(el) {
             var text = el.innerHTML.trim();
-            return (['..', 'KEYS', 'malhar', 'malhar/'].indexOf(text) === -1);
+            return ['..', 'KEYS', 'malhar', 'malhar/'].indexOf(text) === -1;
           });
 
           // Create array of releases from this filtered NodeList
           var releases = releaseLinks.map(function(el) {
-
             var releaseStr = el.innerHTML.trim();
             var repoName;
 
-            if (releaseStr.indexOf('apache-apex-malhar') !== -1) {
-              repoName = 'apex-malhar';
-            }
-
-            if (releaseStr.indexOf('apache-apex-core') !== -1) {
-              repoName = 'apex-core';
-            }
+            // Set correct repo name
+            targets.forEach(function(tar) {
+              if (releaseStr.indexOf(tar.repo) !== -1) {
+                repoName = tar.repo;
+              }
+            });
 
             // Extract release version and docs version
-            var releaseVersion = el.innerHTML.trim().replace('apache-apex-malhar-', '').replace('apache-apex-core-', '').replace(/\/$/, '');
-            var releaseSemVer = releaseVersion.replace('-incubating', '');
+            var releaseVersionText = el.innerHTML.trim();
+
+            // full release version
+            if (/([0-9]+\.[0-9]+\.[0-9]+((.*)([^\/]))*)/.test(releaseVersionText) === true) {
+              var releaseVersion = /([0-9]+\.[0-9]+\.[0-9]+((.*)([^\/]))*)/.exec(releaseVersionText)[1];
+            }
+
+            // strictly numbers for semantic version checking
+            if (/([0-9]+\.[0-9]+\.[0-9]+)/.test(releaseVersionText) === true) {
+              var releaseSemVer = /([0-9]+\.[0-9]+\.[0-9]+)/.exec(releaseVersionText)[1];
+            }
             var docsVersion = semver.major(releaseSemVer) + '.' + semver.minor(releaseSemVer);
 
             return {
@@ -441,7 +433,6 @@ gulp.task('fetch-releases', function(taskCb) {
               repo: repoName
             };
           });
-
 
           // Get tags and hashes for all target repos
           getAllTargetReposTagsHashes().then(function(resp, err) {
@@ -452,7 +443,6 @@ gulp.task('fetch-releases', function(taskCb) {
 
             // Go through all releases
             Q.all(releases.map(function(release) {
-
               var def = Q.defer();
 
               // go through target releases
@@ -460,8 +450,11 @@ gulp.task('fetch-releases', function(taskCb) {
               for (var i=0; i<targets.length; i++) {
                 if(targets[i].repo === release.repo) {
                   for(var j=0; j<targets[i].releases.length; j++) {
+
                     // if target version matches release
                     if (targets[i].releases[j][1] === release.version) {
+
+                      // get tag date from remote repo
                       // arguments: repoName, tagHash
                       getTagDate(release.repo, targets[i].releases[j][0]).then(function(response) {
                         release.date=response;
@@ -473,13 +466,11 @@ gulp.task('fetch-releases', function(taskCb) {
                   break;
                 }
               }
-
               return def.promise;
             }))
 
             // After all tag dates are loaded
             .then(function() {
-
               // sort releases by date
               releases.sort(function(a, b) {
                 return b.date - a.date;
@@ -499,7 +490,6 @@ gulp.task('fetch-releases', function(taskCb) {
               fs.writeFile('./releases.json', JSON.stringify(fileContents, 0, 2));
 
             });
-
           });
         }
       );
