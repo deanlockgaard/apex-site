@@ -12,12 +12,6 @@
         "docs": "3.4",
         "repo": "apex-core",
         "date": 1462902111000
-      },
-      {
-        "version": "3.2.1-incubating",
-        "docs": "3.2",
-        "repo": "apex-core",
-        "date": 1461193940000
       }
     ]
   },
@@ -40,12 +34,6 @@
         "docs": "3.5",
         "repo": "apex-malhar",
         "date": 1472969775000
-      },
-      {
-        "version": "3.4.0",
-        "docs": "3.4",
-        "repo": "apex-malhar",
-        "date": 1464108400000
       }
     ]
   }
