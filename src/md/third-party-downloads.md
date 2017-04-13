@@ -19,6 +19,6 @@ This is a list of 3rd party binary packages based on Apache Apex. The Apache Ape
     - DEB: [Ubuntu 16.04](https://ci.bigtop.apache.org/job/Bigtop-trunk-packages/COMPONENTS=apex,OS=ubuntu-16.04/lastSuccessfulBuild/artifact/output/apex/apex_3.5.0-1_all.deb), [Debian 8](https://ci.bigtop.apache.org/job/Bigtop-trunk-packages/COMPONENTS=apex,OS=debian-8/lastSuccessfulBuild/artifact/output/apex/apex_3.5.0-1_all.deb)
 
 
-- <a href="https://www.datatorrent.com/download/" rel="nofollow">DataTorrent RTS</a> contains a binary build of Apache Apex.
+- <a href="https://www.datatorrent.com/download/" rel="nofollow">DataTorrent RTS</a>, which contains a binary build of Apache Apex.
 
 If you would like to provide your own edition of Apache Apex here, please send email to [dev@apex.apache.org](mailto:dev@apex.apache.org).
