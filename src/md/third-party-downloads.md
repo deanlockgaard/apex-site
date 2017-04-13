@@ -2,7 +2,7 @@
 
 This is a list of 3rd party binary packages based on Apache Apex. The Apache Apex project does not endorse or maintain any 3rd party binary packages.
 
-- Apache Apex [Bigtop](http://bigtop.apache.org/) packages Docker image (a ready to use sandbox environment in which bigtop-hadoop and bigtop-apex are pre-installed)
+- Apache Apex Bigtop packages [Docker image](https://hub.docker.com/r/apacheapex/sandbox/) (a ready to use sandbox environment in which bigtop-hadoop and bigtop-apex are pre-installed)
 
 - [Apache Apex binary build](https://github.com/atrato/apex-cli-package/releases/) for users with existing clusters
 
